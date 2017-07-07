@@ -4,13 +4,16 @@ namespace BeSimple\I18nRoutingBundle\Routing;
 
 use BeSimple\I18nRoutingBundle\Routing\RouteGenerator\NameInflector\PostfixInflector;
 use BeSimple\I18nRoutingBundle\Routing\RouteGenerator\NameInflector\RouteNameInflectorInterface;
-use Symfony\Component\Routing\RouterInterface;
-use Symfony\Component\Routing\Exception\RouteNotFoundException;
 use BeSimple\I18nRoutingBundle\Routing\Translator\AttributeTranslatorInterface;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Exception\MissingMandatoryParametersException;
+use Symfony\Component\Routing\Exception\RouteNotFoundException;
+use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
+use Symfony\Component\Routing\Matcher\RequestMatcherInterface;
 use Symfony\Component\Routing\RequestContext;
+use Symfony\Component\Routing\RouterInterface;
 
-class Router implements RouterInterface
+class Router implements RouterInterface, RequestMatcherInterface
 {
     /**
      * @var AttributeTranslatorInterface
@@ -18,7 +21,7 @@ class Router implements RouterInterface
     protected $translator;
 
     /**
-     * @var RouterInterface
+     * @var RequestMatcherInterface|RouterInterface
      */
     protected $router;
 
@@ -29,6 +32,7 @@ class Router implements RouterInterface
      * @var string
      */
     protected $defaultLocale;
+
     /**
      * @var RouteNameInflectorInterface
      */
@@ -37,12 +41,21 @@ class Router implements RouterInterface
     /**
      * Constructor
      *
-     * @param \Symfony\Component\Routing\RouterInterface   $router
-     * @param Translator\AttributeTranslatorInterface|null $translator
-     * @param string                                       $defaultLocale
+     * @param RouterInterface                   $router The router instance. Instead of RouterInterface, may also
+     *                                                  be RequestMatcherInterface and UrlGeneratorInterface
+     * @param AttributeTranslatorInterface|null $translator
+     * @param string                            $defaultLocale
+     * @param RouteNameInflectorInterface|null  $routeNameInflector
+     * @throws \InvalidArgumentException
      */
-    public function __construct(RouterInterface $router, AttributeTranslatorInterface $translator = null, $defaultLocale = null, RouteNameInflectorInterface $routeNameInflector = null)
+    public function __construct($router, AttributeTranslatorInterface $translator = null, $defaultLocale = null, RouteNameInflectorInterface $routeNameInflector = null)
     {
+        if (!$router instanceof RouterInterface
+            && !($router instanceof RequestMatcherInterface && $router instanceof UrlGeneratorInterface)
+        ) {
+            throw new \InvalidArgumentException(sprintf('%s is not a valid router.', get_class($router)));
+        }
+
         $this->router = $router;
         $this->translator = $translator;
         $this->defaultLocale = $defaultLocale;
@@ -108,38 +121,36 @@ class Router implements RouterInterface
      */
     public function match($pathinfo)
     {
-        $match = $this->router->match($pathinfo);
-
-        // if a _locale parameter isset remove the .locale suffix that is appended to each route in I18nRoute
-        if (!empty($match['_locale']) && preg_match('#^(.+)\.'.preg_quote($match['_locale'], '#').'+$#', $match['_route'], $route)) {
-            $match['_route'] = $route[1];
-
-            // now also check if we want to translate parameters:
-            if (null !== $this->translator && isset($match['_translate'])) {
-                foreach ((array) $match['_translate'] as $attribute) {
-                    $match[$attribute] = $this->translator->translate(
-                        $match['_route'],
-                        $match['_locale'],
-                        $attribute,
-                        $match[$attribute]
-                    );
-                }
-            }
-        }
-
-        return $match;
+        return $this->filterMatch($this->router->match($pathinfo));
     }
 
+    /**
+     * {@inheritdoc}
+     */
+    public function matchRequest(Request $request)
+    {
+        return $this->filterMatch($this->router->matchRequest($request));
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function getRouteCollection()
     {
         return $this->router->getRouteCollection();
     }
 
+    /**
+     * {@inheritdoc}
+     */
     public function setContext(RequestContext $context)
     {
         $this->router->setContext($context);
     }
 
+    /**
+     * {@inheritdoc}
+     */
     public function getContext()
     {
         return $this->router->getContext();
@@ -154,6 +165,33 @@ class Router implements RouterInterface
     public function setDefaultLocale($locale)
     {
         $this->defaultLocale = $locale;
+    }
+
+    /**
+     * Filter Match
+     *
+     * @param array $match
+     * @return array
+     */
+    protected function filterMatch($match) {
+        // if a _locale parameter isset remove the .locale suffix that is appended to each route in I18nRoute
+       if (!empty($match['_locale']) && preg_match('#^(.+)\.'.preg_quote($match['_locale'], '#').'+$#', $match['_route'], $route)) {
+           $match['_route'] = $route[1];
+
+           // now also check if we want to translate parameters:
+           if (null !== $this->translator && isset($match['_translate'])) {
+               foreach ((array) $match['_translate'] as $attribute) {
+                   $match[$attribute] = $this->translator->translate(
+                       $match['_route'],
+                       $match['_locale'],
+                       $attribute,
+                       $match[$attribute]
+                   );
+               }
+           }
+       }
+
+       return $match;
     }
 
     /**

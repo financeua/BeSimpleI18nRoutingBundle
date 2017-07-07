@@ -3,8 +3,10 @@
 namespace BeSimple\I18nRoutingBundle\Tests\Routing;
 
 use BeSimple\I18nRoutingBundle\Routing\Router;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Exception\RouteNotFoundException;
-use Symfony\Component\Routing\RequestContext;
+use Symfony\Component\Routing\Matcher\RequestMatcherInterface;
+use Symfony\Component\Routing\RouterInterface;
 
 class RouterTest extends \PHPUnit_Framework_TestCase
 {
@@ -31,6 +33,37 @@ class RouterTest extends \PHPUnit_Framework_TestCase
         $this->assertEquals('test', $data['_route']);
 
         $data = $router->match('/bar');
+        $this->assertEquals('de', $data['_locale']);
+        $this->assertEquals('test', $data['_route']);
+    }
+
+    public function testMatchRequestLocaleRoute()
+    {
+        $parentRouter = $this->getMock('BeSimple\I18nRoutingBundle\Tests\Routing\RequestMatcher');
+
+        $fooRequest = Request::create('/foo');
+        $barRequest = Request::create('/bar');
+
+        $parentRouter
+            ->expects($this->at(0))
+            ->method('matchRequest')
+            ->with($fooRequest)
+            ->will($this->returnValue(array('_route' => 'test.en', '_locale' => 'en')))
+        ;
+        $parentRouter
+            ->expects($this->at(1))
+            ->method('matchRequest')
+            ->with($barRequest)
+            ->will($this->returnValue(array('_route' => 'test.de', '_locale' => 'de')))
+        ;
+
+        $router = new Router($parentRouter);
+
+        $data = $router->matchRequest($fooRequest);
+        $this->assertEquals('en', $data['_locale']);
+        $this->assertEquals('test', $data['_route']);
+
+        $data = $router->matchRequest($barRequest);
         $this->assertEquals('de', $data['_locale']);
         $this->assertEquals('test', $data['_route']);
     }
@@ -310,4 +343,8 @@ class RouterTest extends \PHPUnit_Framework_TestCase
             ->method('getContext')
             ->will($this->returnValue($context));
     }
+}
+
+abstract class RequestMatcher implements RouterInterface, RequestMatcherInterface
+{
 }
